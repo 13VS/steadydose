@@ -49,10 +49,21 @@ async function fetchAI(prompt, retries = 2) {
           messages: [{ role: "user", content: prompt }]
         })
       });
+      if (!r.ok) {
+        const errText = await r.text();
+        console.error(`API error ${r.status}:`, errText);
+        throw new Error(`API ${r.status}: ${errText.slice(0, 200)}`);
+      }
       const d = await r.json();
+      if (d.error) {
+        console.error("API returned error:", d.error);
+        throw new Error(d.error.message || JSON.stringify(d.error));
+      }
       const txt = (d.content || []).map(b => b.text || "").join("");
+      if (!txt) throw new Error("Empty response from API");
       return JSON.parse(txt.replace(/```json|```/g, "").trim());
     } catch (e) {
+      console.error(`Attempt ${i + 1} failed:`, e.message);
       if (i === retries) throw e;
       await new Promise(r => setTimeout(r, 1000));
     }
@@ -944,10 +955,12 @@ export default function App() {
   const [content, setContent] = useState({});
   const [loadProg, setLoadProg] = useState({ done: 0, total: 0, cur: "" });
   const [curPhase, setCurPhase] = useState(0);
+  const curPhaseRef = useRef(0);
+  const selectedRef = useRef([]);
   const [sessionStart, setSessionStart] = useState(0);
   const [elapsed, setElapsed] = useState(0);
   const [phaseTimes, setPhaseTimes] = useState([]);
-  const [phaseStartRef, setPhaseStartRef] = useState(0);
+  const phaseStartMs = useRef(0);
   const [scores, setScores] = useState({});
   const [streak, setStreak] = useState({ count: 0, lastDate: "" });
   const [sessions, setSessions] = useState(0);
@@ -991,8 +1004,15 @@ export default function App() {
   ];
 
   const toggle = (id) => {
-    if (selected.includes(id)) setSelected(selected.filter(s => s !== id));
-    else if (selected.length < 5) setSelected([...selected, id]);
+    if (selected.includes(id)) {
+      const ns = selected.filter(s => s !== id);
+      setSelected(ns);
+      selectedRef.current = ns;
+    } else if (selected.length < 5) {
+      const ns = [...selected, id];
+      setSelected(ns);
+      selectedRef.current = ns;
+    }
   };
 
   const addCustom = () => {
@@ -1023,7 +1043,10 @@ export default function App() {
         loaded[id] = result;
         history = addToHistory(history, id, extractKeys(id, result));
       } catch (e) {
+        console.error(`Failed to load ${id}:`, e.message);
         loaded[id] = null;
+        setLoadProg(prev => ({ ...prev, cur: `⚠ ${nm} failed: ${e.message.slice(0, 60)}` }));
+        await new Promise(r => setTimeout(r, 1500));
       }
     }
 
@@ -1031,8 +1054,11 @@ export default function App() {
     setContent(loaded);
     setLoadProg({ done: toFetch.length, total: toFetch.length, cur: "Ready!" });
     setCurPhase(0);
-    setSessionStart(Date.now());
-    setPhaseStartRef(Date.now());
+    curPhaseRef.current = 0;
+    selectedRef.current = selected;
+    const now = Date.now();
+    setSessionStart(now);
+    phaseStartMs.current = now;
     setElapsed(0);
     setPhaseTimes([]);
     setScores({});
@@ -1050,11 +1076,18 @@ export default function App() {
 
   const nextPhase = () => {
     const now = Date.now();
-    const dur = Math.floor((now - phaseStartRef) / 1000);
-    setPhaseTimes(prev => [...prev, { id: selected[curPhase], duration: dur }]);
-    if (curPhase >= selected.length - 1) { finish(); return; }
-    setCurPhase(curPhase + 1);
-    setPhaseStartRef(now);
+    const sel = selectedRef.current;
+    const cp = curPhaseRef.current;
+    const dur = Math.floor((now - phaseStartMs.current) / 1000);
+    setPhaseTimes(prev => [...prev, { id: sel[cp], duration: dur }]);
+    if (cp >= sel.length - 1) {
+      finish();
+      return;
+    }
+    const next = cp + 1;
+    curPhaseRef.current = next;
+    setCurPhase(next);
+    phaseStartMs.current = now;
   };
 
   const finish = async () => {
