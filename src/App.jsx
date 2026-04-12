@@ -36,41 +36,6 @@ function sty(color, full) {
    API — proxied through Cloudflare Worker
    ═══════════════════════════════════════ */
 
-async function fetchAI(prompt, retries = 2) {
-  for (let i = 0; i <= retries; i++) {
-    try {
-	  console.error("Prompt being sent:", prompt);
-      const r = await fetch("/api/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
-          max_tokens: 2000,
-          system: "You are a content generator. Respond ONLY with valid JSON. No markdown, no backticks, no preamble.",
-          messages: [{ role: "user", content: prompt }]
-        })
-      });
-      if (!r.ok) {
-        const errText = await r.text();
-        console.error(`API error ${r.status}:`, errText);
-        throw new Error(`API ${r.status}: ${errText.slice(0, 200)}`);
-      }
-      const d = await r.json();
-      if (d.error) {
-        console.error("API returned error:", d.error);
-        throw new Error(d.error.message || JSON.stringify(d.error));
-      }
-      const txt = (d.content || []).map(b => b.text || "").join("");
-      if (!txt) throw new Error("Empty response from API");
-      return JSON.parse(txt.replace(/```json|```/g, "").trim());
-    } catch (e) {
-      console.error(`Attempt ${i + 1} failed:`, e.message);
-      if (i === retries) throw e;
-      await new Promise(r => setTimeout(r, 1000));
-    }
-  }
-}
-
 /* ═══════════════════════════════════════
    CONTENT HISTORY — no repeats for 1 year
    ═══════════════════════════════════════ */
@@ -127,8 +92,8 @@ function extractKeys(actId, data) {
 
 function buildExclusion(used) {
   if (!used.length) return "";
-  const list = used.slice(-200).join("\n- ");
-  return `\n\nCRITICAL: The following have been used before. Do NOT repeat or closely paraphrase ANY of these. Generate something completely different:\n- ${list}`;
+  const list = used.slice(-50).join("\n- ");
+  return `\nDo NOT repeat any of these:\n- ${list}`;
 }
 
 /* ═══════════════════════════════════════
@@ -137,23 +102,58 @@ function buildExclusion(used) {
 
 const PROMPTS = {
   breathing: (used) =>
-    `Generate a unique breathing exercise with a creative thematic name. JSON: {"name":"string","inhale":number(2-8),"hold1":number(0-8),"exhale":number(2-10),"hold2":number(0-4),"desc":"2-sentence description","tip":"mindfulness tip to focus on during practice"}. Make it unique, not standard box/478 breathing.` + buildExclusion(used),
+    `Breathing exercise with creative name. JSON: {"name":"str","inhale":2-8,"hold1":0-8,"exhale":2-10,"hold2":0-4,"desc":"1-sentence","tip":"mindfulness tip"}. Not box/478.` + buildExclusion(used),
 
   reading: (used) =>
-    `Generate a fascinating long-form educational article (400-500 words) on a surprising, little-known topic from science, psychology, history, technology, or biology. JSON: {"title":"string","text":"string (400-500 words)","questions":[{"q":"question","a":"answer"}],"keyTerms":[{"term":"string","definition":"string"}],"furtherThinking":"open-ended reflection question"}. Include 4 questions and 3-4 key terms.` + buildExclusion(used),
+    `Educational article (250-300 words) on a surprising topic from science/psychology/history/tech. JSON: {"title":"str","text":"str 250-300 words","questions":[{"q":"str","a":"str"}],"keyTerms":[{"term":"str","definition":"str"}],"furtherThinking":"str"}. 4 questions, 3 key terms.` + buildExclusion(used),
 
   language: (lang, used) =>
-    `Generate 10 useful vocabulary words in ${lang || "a random language (pick: Spanish, Japanese, French, German, Italian, Portuguese, Korean, Mandarin, Arabic, Hindi)"}. Mix practical and culturally rich words. JSON: {"lang":"language name","words":[{"w":"word in native script","pronunciation":"romanized if non-Latin","m":"meaning","ex":"example sentence","exEn":"English translation","difficulty":"beginner|intermediate|advanced","usage":"when to use"}]}. Exactly 10 words. Every single word must be different from any previously used.` + buildExclusion(used),
+    `10 vocabulary words in ${lang || "a random language (Spanish/Japanese/French/German/Italian/Korean/Mandarin/Arabic/Hindi)"}. JSON: {"lang":"str","words":[{"w":"native script","pronunciation":"romanized if non-Latin","m":"meaning","ex":"example sentence","exEn":"English translation","difficulty":"beginner|intermediate|advanced","usage":"when to use"}]}. 10 words.` + buildExclusion(used),
 
   math: (used) =>
-    `Generate 6 unique math/logic puzzles mixing lateral thinking, probability, sequences, geometry, combinatorics, estimation. JSON: {"puzzles":[{"q":"question","a":"answer with explanation","hint":"nudge without giving away","category":"type","difficulty":"medium|hard"}]}. Exactly 6. Make them genuinely challenging. Every puzzle must be completely original.` + buildExclusion(used),
+    `6 math/logic puzzles (lateral thinking, probability, sequences, geometry, combinatorics). JSON: {"puzzles":[{"q":"str","a":"answer with explanation","hint":"str","category":"type","difficulty":"medium|hard"}]}. 6 puzzles, original.` + buildExclusion(used),
 
   flashcard: (used) =>
-    `Generate 12 flashcards on a PRACTICAL useful topic most people don't know well. Pick from: first aid, negotiation tactics, logical fallacies, cooking science, personal finance, body language, mental models, cognitive distortions, basic repairs, car maintenance, interview psychology, public speaking, nutrition myths, sleep science, memory techniques, conflict resolution, digital security, legal rights everyone should know. JSON: {"topic":"topic name","why":"why this is useful","cards":[{"f":"front (term/scenario)","b":"back (practical explanation 2-3 sentences)","example":"real-world application"}]}. Exactly 12 cards. Pick a DIFFERENT topic from any previously used.` + buildExclusion(used),
+    `12 flashcards on a PRACTICAL topic (first aid/negotiation/logical fallacies/cooking science/personal finance/body language/mental models/digital security/legal rights/memory techniques/nutrition/sleep science). JSON: {"topic":"str","why":"str","cards":[{"f":"front","b":"back 2-3 sentences","example":"real-world use"}]}. 12 cards. Different topic from before.` + buildExclusion(used),
 
   news: (used) =>
-    `Generate a deep knowledge burst on a specific fascinating topic. JSON: {"topic":"topic name","intro":"2-sentence hook","facts":[{"fact":"surprising fact","source":"field this comes from"}],"connections":[{"from":0,"to":1,"link":"how connected"}],"insight":"takeaway","actionable":"something reader can do"}. Include 8 facts and 2-3 connections. Pick a DIFFERENT topic from any previously used.` + buildExclusion(used)
+    `Knowledge burst on a fascinating topic. JSON: {"topic":"str","intro":"1-sentence hook","facts":[{"fact":"str","source":"field"}],"connections":[{"from":0,"to":1,"link":"str"}],"insight":"str","actionable":"str"}. 8 facts, 2-3 connections. Different topic.` + buildExclusion(used)
 };
+
+function buildBatchPrompt(activityIds, langPref, history) {
+  const parts = [];
+  activityIds.forEach(id => {
+    const used = getUsedKeys(history, id);
+    let prompt;
+    if (id === "language") prompt = PROMPTS.language(langPref, used);
+    else prompt = PROMPTS[id](used);
+    parts.push(`### ${id}\n${prompt}`);
+  });
+  return `Generate content for these activities. Return a single JSON object with activity IDs as keys. Each value must match the schema described.\n\n${parts.join("\n\n")}`;
+}
+
+async function fetchAllContent(activityIds, langPref, history) {
+  const prompt = buildBatchPrompt(activityIds, langPref, history);
+  const r = await fetch("/api/generate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 4000,
+      system: "You are a content generator. Respond ONLY with valid JSON. No markdown, no backticks, no preamble. Return one JSON object with activity IDs as keys.",
+      messages: [{ role: "user", content: prompt }]
+    })
+  });
+  if (!r.ok) {
+    const errText = await r.text();
+    throw new Error(`API ${r.status}: ${errText.slice(0, 200)}`);
+  }
+  const d = await r.json();
+  if (d.error) throw new Error(d.error.message || JSON.stringify(d.error));
+  const txt = (d.content || []).map(b => b.text || "").join("");
+  if (!txt) throw new Error("Empty response");
+  return JSON.parse(txt.replace(/```json|```/g, "").trim());
+}
 
 /* ═══════════════════════════════════════
    BRAIN GAMES
@@ -1025,35 +1025,61 @@ export default function App() {
   const startGen = async () => {
     if (selected.length < 2) return;
     const toFetch = selected.filter(id => !id.startsWith("c_") && id !== "brain");
-    setLoadProg({ done: 0, total: toFetch.length, cur: "" });
+    setLoadProg({ done: 0, total: 1, cur: "Generating all content" });
     setView(V.LOAD);
 
     let history = pruneHistory(await loadHistory());
-    const loaded = {};
+    let loaded = {};
 
-    for (let i = 0; i < toFetch.length; i++) {
-      const id = toFetch[i];
-      const nm = (allActs.find(a => a.id === id) || {}).name || id;
-      setLoadProg({ done: i, total: toFetch.length, cur: nm });
+    if (toFetch.length > 0) {
       try {
-        const used = getUsedKeys(history, id);
-        let prompt;
-        if (id === "language") prompt = PROMPTS.language(langPref, used);
-        else prompt = PROMPTS[id](used);
-        const result = await fetchAI(prompt);
-        loaded[id] = result;
-        history = addToHistory(history, id, extractKeys(id, result));
+        const batchResult = await fetchAllContent(toFetch, langPref, history);
+        for (const id of toFetch) {
+          if (batchResult[id]) {
+            loaded[id] = batchResult[id];
+            history = addToHistory(history, id, extractKeys(id, batchResult[id]));
+          } else {
+            loaded[id] = null;
+          }
+        }
       } catch (e) {
-        console.error(`Failed to load ${id}:`, e.message);
-        loaded[id] = null;
-        setLoadProg(prev => ({ ...prev, cur: `⚠ ${nm} failed: ${e.message.slice(0, 60)}` }));
-        await new Promise(r => setTimeout(r, 1500));
+        console.error("Batch fetch failed:", e.message);
+        setLoadProg({ done: 0, total: 1, cur: "⚠ " + e.message.slice(0, 80) });
+        // Fallback: try individually
+        for (let i = 0; i < toFetch.length; i++) {
+          const id = toFetch[i];
+          const nm = (allActs.find(a => a.id === id) || {}).name || id;
+          setLoadProg({ done: i, total: toFetch.length, cur: nm + " (fallback)" });
+          try {
+            const used = getUsedKeys(history, id);
+            let prompt = id === "language" ? PROMPTS.language(langPref, used) : PROMPTS[id](used);
+            const r = await fetch("/api/generate", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                model: "claude-haiku-4-5-20251001",
+                max_tokens: 1500,
+                system: "You are a content generator. Respond ONLY with valid JSON. No markdown, no backticks, no preamble.",
+                messages: [{ role: "user", content: prompt }]
+              })
+            });
+            const d = await r.json();
+            if (d.error) throw new Error(d.error.message);
+            const txt = (d.content || []).map(b => b.text || "").join("");
+            const result = JSON.parse(txt.replace(/```json|```/g, "").trim());
+            loaded[id] = result;
+            history = addToHistory(history, id, extractKeys(id, result));
+          } catch (err) {
+            console.error(`Fallback failed for ${id}:`, err.message);
+            loaded[id] = null;
+          }
+        }
       }
     }
 
     await saveHistory(history);
     setContent(loaded);
-    setLoadProg({ done: toFetch.length, total: toFetch.length, cur: "Ready!" });
+    setLoadProg({ done: 1, total: 1, cur: "Ready!" });
     setCurPhase(0);
     curPhaseRef.current = 0;
     selectedRef.current = selected;
@@ -1248,15 +1274,15 @@ export default function App() {
   // ═══ LOADING ═══
   if (view === V.LOAD) {
     const pct = loadProg.total ? ((loadProg.done / loadProg.total) * 100) : 0;
+    const isError = loadProg.cur.startsWith("⚠");
     return (
       <div style={{ background: C.bg, minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "system-ui", flexDirection: "column", gap: 24 }}>
         <div style={{ fontSize: 48 }}>💊</div>
         <h2 style={{ color: C.text, margin: 0 }}>Preparing your dose</h2>
         <div style={{ width: 300, height: 6, background: C.card, borderRadius: 3, overflow: "hidden" }}>
-          <div style={{ height: 6, background: `linear-gradient(90deg, ${C.accent}, ${C.success})`, width: pct + "%", transition: "width .5s", borderRadius: 3 }} />
+          <div style={{ height: 6, background: `linear-gradient(90deg, ${C.accent}, ${C.success})`, width: pct > 0 ? pct + "%" : "70%", transition: "width .5s", borderRadius: 3, animation: pct === 0 ? "none" : "none" }} />
         </div>
-        <p style={{ color: C.accentL, fontSize: 15 }}>{loadProg.cur}<Dots color={C.accentL} /></p>
-        <p style={{ color: C.dim, fontSize: 13 }}>{loadProg.done}/{loadProg.total} ready</p>
+        <p style={{ color: isError ? C.danger : C.accentL, fontSize: 15 }}>{loadProg.cur}<Dots color={C.accentL} /></p>
       </div>
     );
   }
