@@ -39,6 +39,7 @@ function sty(color, full) {
 async function fetchAI(prompt, retries = 2) {
   for (let i = 0; i <= retries; i++) {
     try {
+	  console.error("Prompt being sent:", prompt);
       const r = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
