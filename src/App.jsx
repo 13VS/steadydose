@@ -249,7 +249,8 @@ function ReactionGame({ onScore }) {
     tr.current = setTimeout(() => { setState("go"); setSt(Date.now()); }, 1500 + Math.random() * 3000);
   };
 
-  const click = () => {
+  const handleTap = (e) => {
+    e.preventDefault();
     if (state === "ready") { clearTimeout(tr.current); setState("tooEarly"); return; }
     if (state === "go") {
       const t = Date.now() - st;
@@ -263,20 +264,24 @@ function ReactionGame({ onScore }) {
 
   const avg = times.length ? Math.round(times.reduce((a, b) => a + b, 0) / times.length) : 0;
   const best = times.length ? Math.min(...times) : 0;
+  const isActive = state === "ready" || state === "go";
 
   return (
     <div style={{ textAlign: "center" }}>
       <h3 style={{ color: C.accentL }}>Reaction Time</h3>
       {times.length > 0 && <p style={{ color: C.dim, fontSize: 13 }}>Best: {best}ms · Avg: {avg}ms · {times.length} tries</p>}
-      <div onClick={(state === "ready" || state === "go") ? click : undefined}
+      <div
+        onPointerDown={isActive ? handleTap : undefined}
+        onTouchStart={isActive ? handleTap : undefined}
         style={{
-          width: 220, height: 220, borderRadius: "50%", margin: "24px auto",
+          width: 260, height: 260, borderRadius: "50%", margin: "24px auto",
           display: "flex", alignItems: "center", justifyContent: "center",
-          cursor: (state === "ready" || state === "go") ? "pointer" : "default",
+          cursor: isActive ? "pointer" : "default",
           background: state === "go" ? C.success : state === "ready" ? C.danger : state === "tooEarly" ? "#c0392b" : C.card,
-          transition: "background .1s", border: `2px solid ${C.border}`
+          transition: "background .1s", border: `2px solid ${C.border}`,
+          touchAction: "manipulation", userSelect: "none", WebkitTapHighlightColor: "transparent"
         }}>
-        <span style={{ color: "#fff", fontSize: 15, fontWeight: 600, textAlign: "center", padding: 16 }}>
+        <span style={{ color: "#fff", fontSize: 16, fontWeight: 600, textAlign: "center", padding: 16, pointerEvents: "none" }}>
           {state === "waiting" ? "Press Start" : state === "ready" ? "Wait for green..." : state === "go" ? "TAP!" : state === "tooEarly" ? "Too early!" : times.length ? `${times[times.length - 1]}ms` : ""}
         </span>
       </div>
